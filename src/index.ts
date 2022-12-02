@@ -6,32 +6,73 @@ import axios, { AxiosRequestConfig } from 'axios';
 import  * as  cheerio  from 'cheerio';
 import * as json2csv from 'json2csv';
 import * as fs from 'fs';
+import {parse} from "url";
+import {Themepark} from "./entity/Themepark";
 
+
+const axiosConfig = {
+    headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36'
+    }
+
+}
 AppDataSource.initialize().then(async () => {
 
-    const domain = 'https://rcdb.com';
-    const region = 'r.htm?ol=1&ot=2';
 
-    const axiosResponse = await axios.get(`${domain}/${region}`, {
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36'
+    getThemeparks("1")
+    // getCoasters("1") // North America
+    // getCoasters("25852") // Europe
+    // getCoasters("26777") //Africa
+    // getCoasters("26371") //Asia
+    // getCoasters("26371") //Australia
+    // getCoasters("26723") //South America
+
+
+}).catch(error => console.log(error))
+
+async function getThemeparks(r: string) {
+    const domain = 'https://rcdb.com';
+    const region = 'r.htm?ol='+r+'&ot=3' // ot=3= Object type =Themeparks
+
+    const axiosResponse = await axios.get(`${domain}/${region}`, axiosConfig);
+
+    const $ = cheerio.load(axiosResponse.data)
+    const totalThemeparks = parseInt($('.int').text())
+    const totalpages = Math.ceil(totalThemeparks / 24);
+    console.log(`total amusementParks: ${totalThemeparks} in ${totalpages} pages`);
+
+    for(let page = 1; page < totalpages; page++) {
+        const axiosPaginatedresponse = await axios.get(`${domain}/${region}&page=${page}`, axiosConfig)
+        const paginates$ = cheerio.load(axiosPaginatedresponse.data);
+        const rows = paginates$('.stdtbl tbody tr');
+
+        for(let i = 0; i < rows.length; i++) {
+            const row$ = cheerio.load(rows[i]);
+            const link = row$('td:nth-of-type(2) a').attr('href')
+            if(link) {
+                const themepark = await getTPDetails(`${domain}${link}`);
+                console.log('link', link, themepark)
+                await AppDataSource.manager.save(Object.assign(themepark));
+            }
         }
-    });
+    }
+}
+
+async function getCoasters(r: string) {
+    const domain = 'https://rcdb.com';
+    const region = 'r.htm?ol='+r+'&ot=2'; // ot=2= Object type =Rollercoasters
+
+    const axiosResponse = await axios.get(`${domain}/${region}`, axiosConfig);
 
     const $ = cheerio.load(axiosResponse.data);
-
     const totalRollerCoasters = parseInt($('.int').text());
     // Assume 24 per page
     const totalPages = Math.ceil(totalRollerCoasters / 24);
 
-    console.log('total pages', totalPages);
+    console.log(`total rollerCoaster: ${totalRollerCoasters} in ${totalPages} pages`);
 
     for (let page = 1; page < totalPages; page++) {
-        const axiosResponsePaginated = await axios.get(`${domain}/${region}&page=${page}`, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36'
-            }
-        });
+        const axiosResponsePaginated = await axios.get(`${domain}/${region}&page=${page}`, axiosConfig);
         const paginated$ = cheerio.load(axiosResponsePaginated.data);
         const rows = paginated$('.stdtbl tbody tr');
 
@@ -40,7 +81,7 @@ AppDataSource.initialize().then(async () => {
             const link = row$('td:nth-of-type(2) a').attr('href');
 
             if (link) {
-                const rollerCoaster = await getDetails(`${domain}${link}`);
+                const rollerCoaster = await getRCDetails(`${domain}${link}`);
                 console.log('link', link, rollerCoaster);
                 await AppDataSource.manager.save(Object.assign(rollerCoaster))
 
@@ -49,16 +90,30 @@ AppDataSource.initialize().then(async () => {
             await timeout(1000);
         }
     }
-}).catch(error => console.log(error))
 
 
-export async function getDetails(detailsLink: string) {
+}
+export async function getTPDetails(detailsLink: string) {
+    const axiosResponse = await axios.get(detailsLink, axiosConfig);
+    const $ = cheerio.load(axiosResponse.data);
 
-    const axiosResponse = await axios.get(detailsLink, {
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36'
-        }
-    });
+    let tp: Themepark = new Themepark();
+    console.log('name: ' + $('#feature h1').text())
+    tp.name = $('#feature h1').text()
+    tp.city= $('#feature > div > a:nth-of-type(1)').text();
+    tp.state= $('#feature > div > a:nth-of-type(2)').text();
+    tp.country= $('#feature > div > a:nth-of-type(3)').text();
+
+    return Promise.resolve(tp);
+
+
+}
+
+
+
+export async function getRCDetails(detailsLink: string) {
+
+    const axiosResponse = await axios.get(detailsLink, axiosConfig);
 
     const $ = cheerio.load(axiosResponse.data);
 
